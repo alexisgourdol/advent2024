@@ -1,33 +1,31 @@
 from __future__ import annotations
 from collections import defaultdict
 from typing import NamedTuple, List, Tuple, Dict, Set, Optional
-
-
-RAW = """AAAA
-BBCD
-BBCC
-EEEC
-AAAA
-"""
-
-RAW_2 = """OOOOO
-OXOXO
-OOOOO
-OXOXO
-OOOOO"""
+from itertools import product
+from pprint import pprint
 
 
 class Point(NamedTuple):
+    """Point class to represent a point <int, int> with a plant type <str>"""
+
     x: int
     y: int
     plant: str
+
+    def __str__(self):
+        return f"P({self.x},{self.y},{self.plant})"
+
+    def __repr__(self):
+        return f"P({self.x},{self.y},{self.plant})"
 
 
 class Garden:
     raw: str
     plants: defaultdict[List[Point]]
 
-    def __init__(self, raw: str, plants=defaultdict(list)) -> None:
+    def __init__(self, raw: str, plants=None) -> None:
+        if plants is None:
+            plants = defaultdict(list)
         self.plants = plants
         self.raw = raw
 
@@ -42,26 +40,36 @@ class Garden:
             else False
         )
         if shorten_output:
-            return f"<Garden> with plants(num_points) : { { k: len(v) for k, v in self.plants.items() } } \n "
-        return f"<Garden> with plants(num_points) : { { k: len(v) for k, v in self.plants.items() } } \n{self.plants=}\n"
+            return f"<Garden> with plants(num_points) : { { k: len(v) for k, v in self.plants.items() } }\n "
+        else:
+            pprint(dict(self.plants))
+            return f"<Garden> with plants(num_points) : { { k: len(v) for k, v in self.plants.items() } }\n"
 
 
 class GardenPlots:
     garden: Garden
     regions: defaultdict[List[Set[Point]]]
 
-    def __init__(self, garden: Garden, regions=defaultdict(list)) -> None:
+    def __init__(self, garden: Garden, regions=None) -> None:
+        if regions is None:
+            regions = defaultdict(list)
         self.garden = garden
         self.regions = regions
 
     def __str__(self):
         regions_num_points = {k: len(v) for k, v in self.regions.items()}
-
-        return f"<GardenPlots> with regions:num_points : { regions_num_points } \n{self.regions=}"
+        pprint(self.regions)
+        # shorten_output = True if sum(regions_num_points.values()) > 25 else False
+        # if shorten_output:
+        # return f"<GardenPlots> with regions:num_points : { regions_num_points }\n"
+        return f"<GardenPlots> with regions:num_points : { regions_num_points }\n"
 
     def add_point_to_garden_plot(
         self, point: Point, new_point: Optional[Point]
     ) -> None:
+        """Assigns a Point (and its neigbour with the same plant type if any)
+        to an existing region or creates a new region before assignment"""
+
         if len(self.regions[point.plant]) == 0:
             # if there is no region defined yet, define one and add points
             region = set()
@@ -71,13 +79,16 @@ class GardenPlots:
             self.regions[point.plant].append(region)
             return
         else:
-            # else check in the list of sets of regions for the region that the point belongs to and add the neighboor (new_point)
+            # else check in the list of sets of regions for the region
+            # that the point belongs to and add the neighboor (new_point)
             for region in self.regions[point.plant]:
                 if point in region and new_point is not None:
                     region.add(new_point)
                     break
                 elif point in region and new_point is None:
-                    # single point new region
+                    # single point new region; clunckuy but avoids potential creation of
+                    # new region for last bottom right point ;
+                    # should be no issue for merge point methodanyways
                     region.add(point)
                     break
                 else:
@@ -90,6 +101,8 @@ class GardenPlots:
                     break
 
     def find_regions(self) -> GardenPlots:
+        """Loops over the garden points and adds each point to a region"""
+
         for plant, points in self.garden.plants.items():
             # {'A': [Point(x=0, y=0, plant='A'), Point(x=1, y=0, plant='A')], 'B' ...}
             for point in points:
@@ -104,42 +117,73 @@ class GardenPlots:
         return self
 
     def merge_regions(self) -> GardenPlots:
-        counter = 0
+        """Check for regions that are contiguous (that share a point)
+        and merge them into a single region. Solves the case of a region embedded in another region
+        """
+
         if len(self.regions.values()) < 2:
             return self
-        while True:
-            # for each point of a region check if it's also in another region
-            for plant, regions in self.regions.items():
-                for r1, r2 in zip(regions, regions[1:]):
-                    if bool(r1.intersection(r2)):
-                        # if they intersect merge the two regions
-                        r1.update(r2)
+        # for each point of a region check if it's also in another region
+        for plant, regions in self.regions.items():
+            for r1, r2 in product(regions, regions[1:]):
+                if bool(r1.intersection(r2)):
+                    # if they intersect merge the two regions
+                    r1.update(r2)
+                    if r2 in self.regions[plant]:
                         self.regions[plant].remove(r2)
-                        counter += 1
-                    counter += 1
-                    if counter > 4:
-                        break
-                break
             break
-
-
-def main():
-    # with open("day12.txt") as f:
-    #     raw = f.read()
-    # garden = parse_input(RAW)
-    # print(garden, garden.plants, sep="\n")
-
-    # garden_plots = find_regions(garden)
-    # print("\n", garden_plots, garden_plots.regions, sep="\n")
-
-    garden_2 = Garden(RAW_2)
-    print(garden_2)
-
-    garden_plots_2 = GardenPlots(garden_2).find_regions()
-    print(garden_plots_2)
-
-    garden_plots_2.merge_regions()
+        return self
 
 
 if __name__ == "__main__":
-    main()
+
+    RAW_1 = """AAAA
+BBCD
+BBCC
+EEEC
+"""
+
+    RAW_2 = """OOOOO
+OXOXO
+OOOOO
+OXOXO
+OOOOO"""
+
+    RAW_3 = """RRRRIICCFF
+RRRRIICCCF
+VVRRRCCFFF
+VVRCCCJFFF
+VVVVCJJCFE
+VVIVCCJJEE
+VVIIICJJEE
+MIIIIIJJEE
+MIIISIJEEE
+MMMISSJEEE"""
+
+    garden_1 = Garden(RAW_1)
+    print(RAW_1)
+    print(garden_1)
+    garden_plots_1 = GardenPlots(garden_1).find_regions()  # .merge_regions()
+    print(garden_plots_1)
+    print("=" * 80)
+
+    garden_2 = Garden(RAW_2)
+    print(RAW_2)
+    print(garden_2)
+    garden_plots_2 = GardenPlots(garden_2).find_regions().merge_regions()
+    print(garden_plots_2)
+    print("=" * 80)
+
+    garden_3 = Garden(RAW_3)
+    print(RAW_3)
+    print(garden_3)
+    garden_plots_3 = GardenPlots(garden_3).find_regions()  # .merge_regions()
+    print(garden_plots_3)
+    print("=" * 80)
+
+    # with open("day12.txt") as f:
+    #     raw = f.read()
+    #     garden = Garden(raw)
+    #     print(garden)
+    #     garden_plots = GardenPlots(garden).find_regions().merge_regions()
+    #     print(garden_plots)
