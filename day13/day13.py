@@ -7,11 +7,10 @@ def parse_input(raw: str) -> list:
     lines = [block.split('\n') for block in blocks]
     parsed = []
     for line in lines:
-        equations = []
-        target = None
+        equations, target = [], None
         for segment in line :
             if segment.startswith('Button'):
-                button, rest = segment.strip('Button ').split(':')
+                _, rest = segment.strip('Button ').split(':')
                 rest = [int(val.strip(" X+").strip("Y+")) for val in rest.split(', ')]
                 x_val, y_val = rest[0], rest[1]
                 equations.append((x_val, y_val))
@@ -66,7 +65,7 @@ def cost_to_win(equations: list, target: tuple, verbose=False, target_adj=False)
             print('Result:')
             print(f' - Number of times the A button is pressed = {a_button_press.solution_value()}')
             print(f' - Number of times the B button is pressed = = {b_button_press.solution_value()}')
-        return optimal_value
+        return int(optimal_value)
     else:
         if verbose:
             print('The solver could not find an optimal solution.')
@@ -78,7 +77,7 @@ def compute_total(inp: list, verbose=False, target_adj=False) -> int:
         equations, target = system
         res = cost_to_win(equations, target, verbose=verbose, target_adj=target_adj)
         total += res if res else 0
-    return int(total)
+    return total
 
 
 if __name__ == "__main__":
@@ -104,16 +103,13 @@ Prize: X=18641, Y=10279"""
     compute_total(inp, target_adj=True, verbose=True)
 
 
-    verbose=True
-
     with open('day13.txt') as f:
         raw = f.read()
     inp = parse_input(raw)
-
-    print(compute_total(inp)) # 39996
+    print("part 1 : ", compute_total(inp)) # 39996
 
     print("part 2 : 58770475218851 too low")
-    print(compute_total(inp, target_adj=True, verbose=True)) # 58770475218851 too low
+    # print(compute_total(inp, target_adj=True, verbose=True)) # 58770475218851 too low
 
 
 
