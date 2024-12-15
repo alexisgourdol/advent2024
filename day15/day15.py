@@ -1,128 +1,213 @@
 from typing import NamedTuple, List, Tuple
-from pprint import pprint
-DIRECTIONS = {
-        '^': (0, -1),
-        'v': (0, 1),
-        '<': (-1, 0),
-        '>': (1, 0)
-    }
+from itertools import zip_longest
+
+DIRECTIONS = {"^": (0, -1), "v": (0, 1), "<": (-1, 0), ">": (1, 0)}
+
+
 class P(NamedTuple):
     x: int
     y: int
 
 
 class Wharehouse(NamedTuple):
-    width : int
-    length : int
-    robot_pos: P
-    boxes_pos: List[P]
-    walls_pos: List[P]
+    width: int
+    length: int
+    robot: P
+    boxes: List[P]
+    walls: List[P]
+    free: List[P]
 
 
+class WharehouseTwice(NamedTuple):
+    width: int
+    length: int
+    robot: P
+    boxes: List[Tuple[P, P]]
+    walls: List[P]
+    free: List[P]
 
-def parse(raw: str)-> Tuple[Wharehouse, str]:
-    wharehouse_raw, moves_raw = raw.strip().split('\n\n')
-    moves = "".join([m for m in moves_raw if m != '\n'])
-    width = None
-    length = None
-    boxes_pos = []
-    walls_pos = []
-    for y, line in enumerate(wharehouse_raw.splitlines()):
+
+def parse(raw: str) -> Tuple[Wharehouse, str]:
+    """Parse the input string to return a wharehouse <Wharehouse> object and the moves <str> to be made"""
+    wharehouse, moves = raw.strip().split("\n\n")
+    moves = "".join([m for m in moves if m != "\n"])
+    width, length = None, None
+    boxes, walls, free = [], [], []
+    for y, line in enumerate(wharehouse.splitlines()):
         if not width:
-            width = len(wharehouse_raw.splitlines())
+            width = len(wharehouse.splitlines())
         if not length:
             length = len(line)
         for x, char in enumerate(line):
-            if char == '@':
-                robot_pos = P(x, y)
-            elif char == 'O':
-                boxes_pos.append(P(x, y))
-            elif char == '#':
-                walls_pos.append(P(x, y))
+            if char == "@":
+                robot = P(x, y)
+            elif char == "O":
+                boxes.append(P(x, y))
+            elif char == "#":
+                walls.append(P(x, y))
+            elif char == ".":
+                free.append(P(x, y))
             else:
-                continue
-    return Wharehouse(width, length, robot_pos, boxes_pos, walls_pos), moves
+                raise ValueError(f"Unexpected character {char}")
+    return Wharehouse(width, length, robot, boxes, walls, free), moves
 
-def move(char: str, wharehouse: Wharehouse) -> Wharehouse:
+
+def swap_box_free(
+    w: Wharehouse,
+    char: str,
+    boxes_ahead: List[P],
+    free_ahead: List[P],
+    robot: P,
+    new_robot: P,
+) -> Wharehouse:
+    """When the robot finds a box, move it to the next closest free space. Update current box position with a freespace
+    Takes into consideration if we are going in positive direction(>v) or negative(<^)
+    Returns a new wharehouse with the robot and the box in their new positions"""
+
+    boxes_ahead, free_ahead = sorted(boxes_ahead), sorted(free_ahead)
+    if char in ">v":
+        box_pop, free_pop = boxes_ahead[0], free_ahead[0]
+    elif char in "<^":
+        box_pop, free_pop = boxes_ahead[-1], free_ahead[-1]
+
+    new_boxes, new_free = w.boxes.copy(), w.free.copy()
+
+    new_boxes.remove(box_pop)
+    new_boxes.append(free_pop)
+
+    new_free.remove(free_pop)
+    new_free.append(robot)  # old robot position is now free
+    return Wharehouse(w.width, w.length, new_robot, new_boxes, w.walls, new_free)
+
+
+def move(char: str, w: Wharehouse) -> Wharehouse:
     """Check the new position for the robot
-        - return same wharehouse if there is a wall
-        - return new wharehouse if there is an empty space, with the robot in its new position
-        - if there is a box
-            - if the box can be moved, return the new wharehouse with the robot and the box in its new positions
-            - otherwise return the same wharehouse"""
+    - return same wharehouse if there is a wall
+    - return new wharehouse if there is an empty space, with the robot in its new position
+    - if there is a box
+        - if the box can be moved, return the new wharehouse with the robot and the box in its new positions
+        - otherwise return the same wharehouse"""
 
-    robot = wharehouse.robot_pos
+    r = w.robot
     dx, dy = DIRECTIONS[char]
-    new_robot = P(robot.x + dx, robot.y  + dy)
+    new_robot = P(r.x + dx, r.y + dy)
 
-    if new_robot in wharehouse.walls_pos:
-        # print("  **  Wall encountered")
-        return wharehouse
+    if new_robot in w.walls:
+        return w
+    elif new_robot in w.free:
+        new_free = w.free.copy()
+        new_free.remove(new_robot)
+        new_free.append(r)
+        return Wharehouse(w.width, w.length, new_robot, w.boxes, w.walls, new_free)
+    elif new_robot in w.boxes:
 
-    elif new_robot not in (wharehouse.walls_pos + wharehouse.boxes_pos):
-        # print(f"  **  Empty space encountered {new_robot=}")
-        return Wharehouse(
-           wharehouse.width,
-           wharehouse.length,
-           new_robot,
-           wharehouse.boxes_pos,
-           wharehouse.walls_pos)
+        #### check what is ahead
+        boxes_ahead, free_ahead = [], []
+        x_range = w.width - r.x if char in ">v" else r.x
+        y_range = w.length - r.y if char in ">v" else r.y
+        for px, py in zip_longest(
+            range(1, x_range), range(1, y_range)
+        ):  # start 1 to avoid checking the robot's current position
+            if px == None:
+                px = py  # zip longest sends None, force value as we move along the y axis
+            if py == None:
+                py = px  # zip longest sends None, force value as we move along the x axis
+            pos = P(r.x + dx * px, r.y + dy * py)
 
-    elif new_robot in wharehouse.boxes_pos:
-        boxes_ahead = []
-        empty_ahead = []
-        new_boxes = []
-        # print(f"  **  Box encountered {new_robot=}")
-        for px, py in zip(
-            range(1, wharehouse.width - robot.x),
-            range(1, wharehouse.length - robot.y)
-            ):
-            pos = P(robot.x + dx * px, robot.y + dy * py)
-
-            if (pos.y in (0, wharehouse.length) or pos.x in (0, wharehouse.width)):
-                # print(f"    **  Wall encountered for checked position:{pos=}")
+            if pos in w.walls:
                 break
-            if pos in wharehouse.boxes_pos:
-                # print(f"    **  Box appended:{pos=}")
+            elif pos in w.boxes:
                 boxes_ahead.append(pos)
-            if pos not in (wharehouse.walls_pos + wharehouse.boxes_pos ):
-                # print(f"    **  Empty pos detected:{pos=}")
-                empty_ahead.append(pos)
-
-        # looping over boxes ahead approach
-        for box in boxes_ahead:
-            if P(box.x + dx, box.y + dy) in empty_ahead:
-                new_boxes = wharehouse.boxes_pos.copy()
-                new_boxes.remove(box)
-                new_boxes.append(P(box.x + dx, box.y + dy))
-                print(f"  **  Box moved: \n{new_boxes} ")
-                return Wharehouse(
-                    wharehouse.width,
-                    wharehouse.length,
-                    new_robot,
-                    new_boxes,
-                    wharehouse.walls_pos)
+            elif pos in w.free:
+                free_ahead.append(pos)
             else:
-                print(f"  **  Box could not be moved: \n{boxes_ahead=}\n{empty_ahead=} ")
-                return wharehouse
+                raise ValueError(f"Unexpected thing at position {pos}")
 
-def w_print(wharehouse: Wharehouse) -> None:
-    res = []
-    for y in range(wharehouse.length):
-        for x in range(wharehouse.width):
-            if P(x, y) == wharehouse.robot_pos:
-                print('@', end='')
-            elif P(x, y) in wharehouse.boxes_pos:
-                print('O', end='')
-            elif P(x, y) in wharehouse.walls_pos:
-                print('#', end='')
+        #### case by case solution
+        if not free_ahead:
+            return w
+        else:
+            return swap_box_free(w, char, boxes_ahead, free_ahead, r, new_robot)
+
+
+def w_print(w: Wharehouse) -> None:
+    """Print the wharehouse in teh terminal"""
+    for y in range(w.length):
+        for x in range(w.width):
+            if P(x, y) == w.robot:
+                print("@", end="")
+            elif P(x, y) in w.boxes:
+                print("O", end="")
+            elif P(x, y) in w.walls:
+                print("#", end="")
+            elif P(x, y) in w.free:
+                print(".", end="")
+        print(end="\n")
+    print(end="\n")
+
+
+def gps(w: Wharehouse) -> int:
+    """ "Calculate the GPS value of the wharehouse"""
+    return sum([box.y * 100 + box.x for box in w.boxes])
+
+
+def build_twice_map(raw: str) -> List[List[str]]:
+    """Build the map of the wharehouse with the boxes and the robot"""
+    wharehouse_map = raw.split("\n\n")[0]
+    str_map = []
+    for line in wharehouse_map.strip().splitlines():
+        new_line = []
+        for char in line:
+            if char == "@":
+                new_line.append("@")
+            elif char == "O":
+                new_line.append("[")
+                new_line.append("]")
+            elif char == ".":
+                new_line.append(".")
+                new_line.append(".")
+            elif char == "#":
+                new_line.append("#")
+                new_line.append("#")
             else:
-                print('.', end='')
-        print(end='\n')
-    print(end='\n')
+                raise ValueError(f"Unexpected character {char}")
+        str_map.append(new_line)
+    return str_map
 
-def gps (wharehouse: Wharehouse) -> int:
-    return sum([box.y *100 + box.x for box in wharehouse.boxes_pos])
+
+def get_wharehouse_twice(str_map: List[List[str]]) -> WharehouseTwice:
+    """Get the wharehouse object for the twice map"""
+    width, length = len(str_map[0]), len(str_map)
+    robot = None
+    boxes, walls, free = [], [], []
+    for y, line in enumerate(str_map):
+        for x, char in enumerate(line):
+            if char == "@":
+                robot = P(x, y)
+            elif char == "[":
+                boxes.append((P(x, y), P(x + 1, y)))
+            elif char == "#" and P(x + 1, y) not in [w2 for (w1, w2) in walls]:
+                walls.append(P(x, y))
+                walls.append(P(x + 1, y))
+            elif char == "." and P(x + 1, y) not in [w2 for (w1, w2) in free]:
+                free.append(P(x, y))
+                free.append(P(x +1 , y))
+    return WharehouseTwice(width, length, robot, boxes, walls, free)
+
+def w_twice_print(w: WharehouseTwice) -> None:
+    """Print the wharehouse in teh terminal"""
+    for y in range(w.length):
+        for x in range(w.width):
+            if P(x, y) == w.robot:
+                print("@", end="")
+            elif (P(x, y), P(x+1, y)) in w.boxes:
+                print("[]", end="")
+            elif P(x, y) in w.walls:
+                print("#", end="")
+            elif P(x, y) in w.free:
+                print(".", end="")
+        print(end="\n")
+    print(end="\n")
 
 RAW = """########
 #..O.O.#
@@ -157,6 +242,7 @@ vvv<<^>^v^^><<>>><>^<<><^vv^^<>vvv<>><^^v>^>vv<>v<<<<v<^v>^<^^>>>^<v<v
 ^^>vv<^v^v<vv>^<><v<^v>^^^>>>^^vvv^>vvv<>>>^<^>>>>>^<<^v>^vvv<>^<><<v>
 v^^>>><<^^<>>^v^<v^vv<>v^<<>^<^v^v><^<<<><<^<v><v<>vv>>v><v^<vv<>v^<<^
 """
+
 RAW_2_final = """
 ##########
 #.O.O.OOO#
@@ -169,48 +255,26 @@ RAW_2_final = """
 #OO....OO#
 ##########\n\n<"""
 
+def run(name:str, raw: str) -> None:
+    wharehouse, moves = parse(raw)
+    for m in moves:
+        wharehouse = move(m, wharehouse)
+    gps_value = gps(wharehouse)
+    print(f"{name} : ", gps_value)
+    w_print(wharehouse)
+    print("_" * 60)
+    return  gps_value
 
-test_wharehouse, test_moves = parse(RAW)
-w_print(test_wharehouse)
-for m in test_moves[:7]:
-    print(f"=={m}\n{test_wharehouse.robot_pos=}")
-    print(f"  {test_wharehouse.boxes_pos=}")
-    test_wharehouse = move(m, test_wharehouse)
-    w_print(test_wharehouse)
-    print(f"  {test_wharehouse.robot_pos=}")
-    print(f"  {test_wharehouse.boxes_pos=}")
-
-"""
-print("test : ", gps(test_wharehouse))
-test_wharehouse_2, test_moves_2 = parse(RAW_2)
-for m in test_moves_2:
-    test_wharehouse_2 = move(m, test_wharehouse_2)
-print("test 2 : ", gps(test_wharehouse_2))
-
-test_wharehouse_2_final, test_moves_2_final = parse(RAW_2_final)
-for m in test_moves_2_final:
-    test_wharehouse_2_final = move(m, test_wharehouse_2_final)
-
-print("test 2 final: ", gps(test_wharehouse_2_final))
+if __name__ == "__main__":
+    assert run("test", RAW) == 2028
+    assert run("test 2", RAW_2)  == 10092
 
 
-print(f"==\n{test_wharehouse_2.width=}\n{test_wharehouse_2.length=}\n{test_wharehouse_2.robot_pos=}")
-pprint(f"{test_wharehouse_2.boxes_pos=}\n==")
+    with open("day15.txt") as f:
+        data = f.read()
+    run("part1", data)
 
-
-print(f"==\n{test_wharehouse_2_final.width=}\n{test_wharehouse_2_final.length=}\n{test_wharehouse_2_final.robot_pos=}")
-pprint(f"{test_wharehouse_2_final.boxes_pos=}\n==")
-
-pprint(f"{set(test_wharehouse_2.boxes_pos)=}\n==")
-pprint(f"{set(test_wharehouse_2_final.boxes_pos) - set(test_wharehouse_2.boxes_pos) =}")
-
-"""
-"""
-with open("day15.txt") as f:
-    data = f.read()
-wharehouse, moves = parse(data)
-# print(wharehouse)
-# print(moves)
-
-
-"""
+    print("part2")
+    str_map = build_twice_map(RAW_2)
+    wharehouse_twice = get_wharehouse_twice(str_map)
+    w_twice_print(wharehouse_twice)
