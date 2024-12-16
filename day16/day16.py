@@ -95,6 +95,7 @@ def simulate_multiple_paths(maze):
         # rank path by lowest scores
         # idea : at some point, the turns will be a dead end, focing the path to be longer but with lower costly turns
         # check if placing wall doest't trap the user
+    ...
 
 
 if __name__ == "__main__":
